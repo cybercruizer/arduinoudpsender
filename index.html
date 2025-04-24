@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arduino UDP JSON Sender</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 150px;
+            font-family: monospace;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .preset-container {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .preset-button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        .preset-button:hover {
+            background-color: #0069d9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Arduino UDP JSON Sender</h1>
+        
+        <div class="form-group">
+            <label for="ipAddress">Arduino IP Address:</label>
+            <input type="text" id="ipAddress" placeholder="192.168.1.100" value="192.168.1.100">
+        </div>
+        
+        <div class="form-group">
+            <label for="port">UDP Port:</label>
+            <input type="number" id="port" placeholder="8888" value="8888">
+        </div>
+        
+        <div class="form-group">
+            <label for="jsonData">JSON Data:</label>
+            <textarea id="jsonData" placeholder='{"command": "led", "value": 1}'></textarea>
+        </div>
+        
+        <button id="sendButton">Send UDP Data</button>
+        
+        <div id="status" class="status" style="display: none;"></div>
+        
+        <div class="preset-container">
+            <h3>Preset Commands</h3>
+            <button class="preset-button" data-json='{"command": "led", "value": 1}'>LED ON</button>
+            <button class="preset-button" data-json='{"command": "led", "value": 0}'>LED OFF</button>
+            <button class="preset-button" data-json='{"command": "servo", "angle": 90}'>Servo 90°</button>
+            <button class="preset-button" data-json='{"command": "servo", "angle": 0}'>Servo 0°</button>
+            <button class="preset-button" data-json='{"command": "motor", "speed": 100}'>Motor Full</button>
+            <button class="preset-button" data-json='{"command": "motor", "speed": 0}'>Motor Stop</button>
+            <button class="preset-button" data-json='{"command": "get_status"}'>Get Status</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Elements
+            const ipAddressInput = document.getElementById('ipAddress');
+            const portInput = document.getElementById('port');
+            const jsonDataInput = document.getElementById('jsonData');
+            const sendButton = document.getElementById('sendButton');
+            const statusDiv = document.getElementById('status');
+            const presetButtons = document.querySelectorAll('.preset-button');
+            
+            // Set default JSON
+            jsonDataInput.value = '{"command": "led", "value": 1}';
+            
+            // Load saved settings if available
+            if (localStorage.getItem('arduinoIp')) {
+                ipAddressInput.value = localStorage.getItem('arduinoIp');
+            }
+            if (localStorage.getItem('arduinoPort')) {
+                portInput.value = localStorage.getItem('arduinoPort');
+            }
+            
+            // Preset buttons
+            presetButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const presetData = this.getAttribute('data-json');
+                    
+                    try {
+                        // Format the JSON nicely
+                        const formattedJson = JSON.stringify(JSON.parse(presetData), null, 2);
+                        jsonDataInput.value = formattedJson;
+                    } catch (e) {
+                        jsonDataInput.value = presetData;
+                    }
+                });
+            });
+            
+            // Send button click
+            sendButton.addEventListener('click', function() {
+                const ipAddress = ipAddressInput.value.trim();
+                const port = parseInt(portInput.value.trim());
+                let jsonData = jsonDataInput.value.trim();
+                
+                // Validate IP address
+                const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+                if (!ipRegex.test(ipAddress)) {
+                    showStatus('Invalid IP address format', 'error');
+                    return;
+                }
+                
+                // Validate port
+                if (isNaN(port) || port < 1 || port > 65535) {
+                    showStatus('Port must be between 1 and 65535', 'error');
+                    return;
+                }
+                
+                // Validate JSON
+                try {
+                    JSON.parse(jsonData);
+                } catch (e) {
+                    showStatus('Invalid JSON format: ' + e.message, 'error');
+                    return;
+                }
+                
+                // Save settings
+                localStorage.setItem('arduinoIp', ipAddress);
+                localStorage.setItem('arduinoPort', port);
+                
+                // Send data
+                sendUDPData(ipAddress, port, jsonData);
+            });
+            
+            // Function to send UDP data
+            function sendUDPData(ip, port, data) {
+                // In a real application, we would use WebSockets or a backend server
+                // to handle UDP communication, as browsers can't directly send UDP packets
+                
+                // For demonstration purposes, we'll simulate sending data
+                
+                // This is where you would typically make an AJAX request to your server
+                // which would then forward the UDP packet to the Arduino
+                
+                // Example:
+                /*
+                fetch('/api/send-udp', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        ip: ip,
+                        port: port,
+                        data: data
+                    })
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        showStatus('Data sent successfully!', 'success');
+                    } else {
+                        showStatus('Error sending data: ' + result.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    showStatus('Network error: ' + error.message, 'error');
+                });
+                */
+                
+                // Simulation for demo
+                setTimeout(() => {
+                    showStatus(`UDP data sent to ${ip}:${port}: ${data}`, 'success');
+                    console.log(`Sending to ${ip}:${port}: ${data}`);
+                }, 500);
+            }
+            
+            // Show status message
+            function showStatus(message, type) {
+                statusDiv.textContent = message;
+                statusDiv.className = 'status ' + type;
+                statusDiv.style.display = 'block';
+                
+                // Auto-hide after 5 seconds
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                }, 5000);
+            }
+        });
+    </script>
+</body>
+</html>
